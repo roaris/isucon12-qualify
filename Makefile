@@ -1,6 +1,3 @@
-build:
-	make -C webapp/go build
-
 deploy:
 	make -C webapp/go deploy
 
