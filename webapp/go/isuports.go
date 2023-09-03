@@ -40,6 +40,11 @@ const (
 	RoleNone      = "none"
 )
 
+type tenantAndCompetition struct {
+	tenantID      int64
+	competitionID string
+}
+
 var (
 	// 正しいテナント名の正規表現
 	tenantNameRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
@@ -47,6 +52,9 @@ var (
 	adminDB *sqlx.DB
 
 	sqliteDriverName = "sqlite3"
+
+	// key: ((tenantID, competitionID), playerID)
+	visitMap = map[tenantAndCompetition]map[string]struct{}{}
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -545,23 +553,10 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 	}
 
 	// ランキングにアクセスした参加者のIDを取得する
-	vhs := []VisitHistorySummaryRow{}
-	if err := adminDB.SelectContext(
-		ctx,
-		&vhs,
-		"SELECT player_id, MIN(created_at) AS min_created_at FROM visit_history WHERE tenant_id = ? AND competition_id = ? GROUP BY player_id",
-		tenantID,
-		comp.ID,
-	); err != nil && err != sql.ErrNoRows {
-		return nil, fmt.Errorf("error Select visit_history: tenantID=%d, competitionID=%s, %w", tenantID, comp.ID, err)
-	}
+	k := tenantAndCompetition{tenantID: tenantID, competitionID: competitonID}
 	billingMap := map[string]string{}
-	for _, vh := range vhs {
-		// competition.finished_atよりもあとの場合は、終了後に訪問したとみなして大会開催内アクセス済みとみなさない
-		if comp.FinishedAt.Valid && comp.FinishedAt.Int64 < vh.MinCreatedAt {
-			continue
-		}
-		billingMap[vh.PlayerID] = "visitor"
+	for playerID := range visitMap[k] {
+		billingMap[playerID] = "visitor"
 	}
 
 	// player_scoreを読んでいるときに更新が走ると不整合が起こるのでロックを取得する
@@ -1340,15 +1335,12 @@ func competitionRankingHandler(c echo.Context) error {
 		return fmt.Errorf("error Select tenant: id=%d, %w", v.tenantID, err)
 	}
 
-	if _, err := adminDB.ExecContext(
-		ctx,
-		"INSERT INTO visit_history (player_id, tenant_id, competition_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-		v.playerID, tenant.ID, competitionID, now, now,
-	); err != nil {
-		return fmt.Errorf(
-			"error Insert visit_history: playerID=%s, tenantID=%d, competitionID=%s, createdAt=%d, updatedAt=%d, %w",
-			v.playerID, tenant.ID, competitionID, now, now, err,
-		)
+	if !competition.FinishedAt.Valid || (now <= competition.FinishedAt.Int64) { // 大会開催内のみ記録する
+		k := tenantAndCompetition{tenantID: tenant.ID, competitionID: competitionID}
+		if _, ok := visitMap[k]; !ok {
+			visitMap[k] = map[string]struct{}{}
+		}
+		visitMap[k][v.playerID] = struct{}{}
 	}
 
 	var rankAfter int64
