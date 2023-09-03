@@ -9,9 +9,9 @@ services:
       ISUCON_DB_NAME: isuports
     network_mode: host
     volumes:
-      - /home/isucon/webapp/tenant_db:/home/isucon/webapp/tenant_db
-      - /home/isucon/webapp/sql:/home/isucon/webapp/sql
-      - /home/isucon/webapp/public.pem:/home/isucon/webapp/public.pem:ro
-      - /home/isucon/initial_data:/home/isucon/initial_data
-      - /home/isucon/tmp:/home/isucon/tmp
+      - /home/isucon/isucon12-qualify/webapp/tenant_db:/home/isucon/isucon12-qualify/webapp/tenant_db
+      - /home/isucon/isucon12-qualify/webapp/sql:/home/isucon/isucon12-qualify/webapp/sql
+      - /home/isucon/isucon12-qualify/webapp/public.pem:/home/isucon/isucon12-qualify/webapp/public.pem:ro
+      - /home/isucon/isucon12-qualify/initial_data:/home/isucon/isucon12-qualify/initial_data
+      - /home/isucon/isucon12-qualify/tmp:/home/isucon/isucon12-qualify/tmp
     init: true
