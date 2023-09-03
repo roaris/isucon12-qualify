@@ -1605,6 +1605,28 @@ func initializeHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
 	}
+	type sqlResult struct {
+		PlayerID      string `db:"player_id"`
+		TenantID      int64  `db:"tenant_id"`
+		CompetitionID string `db:"competition_id"`
+	}
+	var sqlResults []sqlResult
+	if err := adminDB.SelectContext(
+		context.Background(),
+		&sqlResults,
+		"SELECT player_id, tenant_id, competition_id FROM visit_history",
+	); err != nil {
+		return fmt.Errorf("select visit history failed: %e", err)
+	}
+
+	for _, sqlResult := range sqlResults {
+		k := tenantAndCompetition{tenantID: sqlResult.TenantID, competitionID: sqlResult.CompetitionID}
+		if _, ok := visitMap[k]; !ok {
+			visitMap[k] = map[string]struct{}{}
+		}
+		visitMap[k][sqlResult.PlayerID] = struct{}{}
+	}
+
 	res := InitializeHandlerResult{
 		Lang: "go",
 	}
