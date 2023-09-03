@@ -1365,34 +1365,45 @@ func competitionRankingHandler(c echo.Context) error {
 		return fmt.Errorf("error flockByTenantID: %w", err)
 	}
 	defer fl.Close()
-	pss := []PlayerScoreRow{}
+
+	type sqlResult struct {
+		PlayerID          string `db:"player_id"`
+		PlayerDisplayName string `db:"display_name"`
+		Score             int64  `db:"score"`
+		RowNum            int64  `db:"row_num"`
+	}
+	sqlResults := []sqlResult{}
+
 	if err := tenantDB.SelectContext(
 		ctx,
-		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
+		&sqlResults,
+		`
+			SELECT ps.player_id, p.display_name, ps.score, ps.row_num
+			FROM player_score ps JOIN player p ON ps.player_id = p.id
+			WHERE ps.tenant_id = ? AND ps.competition_id = ?
+			ORDER BY ps.row_num DESC
+		`,
 		tenant.ID,
 		competitionID,
 	); err != nil {
 		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
-	ranks := make([]CompetitionRank, 0, len(pss))
-	scoredPlayerSet := make(map[string]struct{}, len(pss))
-	for _, ps := range pss {
+
+	ranks := make([]CompetitionRank, 0, len(sqlResults))
+	scoredPlayerSet := make(map[string]struct{}, len(sqlResults))
+
+	for _, sqlResult := range sqlResults {
 		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
 		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
+		if _, ok := scoredPlayerSet[sqlResult.PlayerID]; ok {
 			continue
 		}
-		scoredPlayerSet[ps.PlayerID] = struct{}{}
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		scoredPlayerSet[sqlResult.PlayerID] = struct{}{}
 		ranks = append(ranks, CompetitionRank{
-			Score:             ps.Score,
-			PlayerID:          p.ID,
-			PlayerDisplayName: p.DisplayName,
-			RowNum:            ps.RowNum,
+			Score:             sqlResult.Score,
+			PlayerID:          sqlResult.PlayerID,
+			PlayerDisplayName: sqlResult.PlayerDisplayName,
+			RowNum:            sqlResult.RowNum,
 		})
 	}
 	sort.Slice(ranks, func(i, j int) bool {
