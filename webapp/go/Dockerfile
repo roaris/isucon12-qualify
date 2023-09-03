@@ -13,9 +13,9 @@ RUN apt-get update && \
 RUN useradd --uid=1001 --create-home isucon
 USER isucon
 
-RUN mkdir -p /home/isucon/webapp/go
-WORKDIR /home/isucon/webapp/go
-COPY --chown=isucon:isucon ./ /home/isucon/webapp/go/
+RUN mkdir -p /home/isucon/isucon12-qualify/webapp/go
+WORKDIR /home/isucon/isucon12-qualify/webapp/go
+COPY --chown=isucon:isucon ./ /home/isucon/isucon12-qualify/webapp/go/
 
 ENV GOPATH=/home/isucon/tmp/go
 ENV GOCACHE=/home/isucon/tmp/go/.cache
