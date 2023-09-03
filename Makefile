@@ -13,9 +13,7 @@ bench-prepare:
 bench-result:
 	mkdir -p alp/dump
 	cat /var/log/nginx/access.log \
-	| alp ltsv \
-	-m '*' \
-		--sort avg -r --dump alp/dump/`git show --format='%h' --no-patch` > /dev/null
+	| alp ltsv -m '/api/organizer/player/[a-z0-9]+/disqualified,/api/organizer/competition/[a-z0-9]+/finish,/api/organizer/competition/[a-z0-9]+/score,/api/player/player/[a-z0-9]+,/api/player/competition/[a-z0-9]+/ranking' --sort avg -r --dump alp/dump/`git show --format='%h' --no-patch` > /dev/null
 
 latest-alp:
 	mkdir -p alp/result
