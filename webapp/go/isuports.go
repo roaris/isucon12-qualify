@@ -1379,8 +1379,7 @@ func competitionRankingHandler(c echo.Context) error {
 		&sqlResults,
 		`
 			SELECT ps.player_id, p.display_name, ps.score, ps.row_num
-			FROM player_score ps JOIN player p ON ps.player_id = p.id
-			WHERE ps.tenant_id = ? AND ps.competition_id = ?
+			FROM player_score ps JOIN player p ON ps.player_id = p.id AND ps.tenant_id = ? AND ps.competition_id = ?
 			ORDER BY ps.row_num DESC
 		`,
 		tenant.ID,
