@@ -1029,8 +1029,6 @@ func competitionScoreHandler(c echo.Context) error {
 		id        string
 		score     int64
 		rowNum    int64
-		createdAt int64
-		updatedAt int64
 	}
 	insertRowByPlayer := map[string]insertRow{}
 	for {
@@ -1085,8 +1083,6 @@ func competitionScoreHandler(c echo.Context) error {
 				id:        id,
 				score:     score,
 				rowNum:    rowNum,
-				createdAt: now,
-				updatedAt: now,
 			}
 		}
 	}
@@ -1102,12 +1098,12 @@ func competitionScoreHandler(c echo.Context) error {
 	for playerID, val := range insertRowByPlayer {
 		if _, err := tenantDB.ExecContext(
 			ctx,
-			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
-			val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, val.createdAt, val.updatedAt,
+			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num) VALUES (?, ?, ?, ?, ?, ?)",
+			val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum,
 		); err != nil {
 			return fmt.Errorf(
-				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
-				val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, val.createdAt, val.updatedAt, err,
+				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, %w",
+				val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, err,
 			)
 
 		}
