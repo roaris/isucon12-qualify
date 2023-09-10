@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1046,6 +1045,14 @@ func competitionScoreHandler(c echo.Context) error {
 	defer fl.Close()
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
+	type insertRow struct {
+		id        string
+		score     int64
+		rowNum    int64
+		createdAt int64
+		updatedAt int64
+	}
+	insertRowByPlayer := map[string]insertRow{}
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1091,6 +1098,17 @@ func competitionScoreHandler(c echo.Context) error {
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		})
+
+		val, ok := insertRowByPlayer[playerID]
+		if !ok || score > val.score {
+			insertRowByPlayer[playerID] = insertRow{
+				id:        id,
+				score:     score,
+				rowNum:    rowNum,
+				createdAt: now,
+				updatedAt: now,
+			}
+		}
 	}
 
 	if _, err := tenantDB.ExecContext(
@@ -1101,15 +1119,15 @@ func competitionScoreHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
-	for _, ps := range playerScoreRows {
-		if _, err := tenantDB.NamedExecContext(
+	for playerID, val := range insertRowByPlayer {
+		if _, err := tenantDB.ExecContext(
 			ctx,
 			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
-			ps,
+			val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, val.createdAt, val.updatedAt,
 		); err != nil {
 			return fmt.Errorf(
 				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
-				ps.ID, ps.TenantID, ps.PlayerID, ps.CompetitionID, ps.Score, ps.RowNum, ps.CreatedAt, ps.UpdatedAt, err,
+				val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, val.createdAt, val.updatedAt, err,
 			)
 
 		}
@@ -1361,21 +1379,14 @@ func competitionRankingHandler(c echo.Context) error {
 	if err := tenantDB.SelectContext(
 		ctx,
 		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY row_num DESC",
+		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY score DESC, row_num",
 		tenant.ID,
 		competitionID,
 	); err != nil {
 		return fmt.Errorf("error Select player_score: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
 	ranks := make([]CompetitionRank, 0, len(pss))
-	scoredPlayerSet := make(map[string]struct{}, len(pss))
 	for _, ps := range pss {
-		// player_scoreが同一player_id内ではrow_numの降順でソートされているので
-		// 現れたのが2回目以降のplayer_idはより大きいrow_numでスコアが出ているとみなせる
-		if _, ok := scoredPlayerSet[ps.PlayerID]; ok {
-			continue
-		}
-		scoredPlayerSet[ps.PlayerID] = struct{}{}
 		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
 		if err != nil {
 			return fmt.Errorf("error retrievePlayer: %w", err)
@@ -1387,12 +1398,6 @@ func competitionRankingHandler(c echo.Context) error {
 			RowNum:            ps.RowNum,
 		})
 	}
-	sort.Slice(ranks, func(i, j int) bool {
-		if ranks[i].Score == ranks[j].Score {
-			return ranks[i].RowNum < ranks[j].RowNum
-		}
-		return ranks[i].Score > ranks[j].Score
-	})
 	pagedRanks := make([]CompetitionRank, 0, 100)
 	for i, rank := range ranks {
 		if int64(i) < rankAfter {
