@@ -22,9 +22,11 @@ func main() {
 		competitionID string
 	}
 	type mapValue struct {
-		id     string
-		score  int64
-		rowNum int64
+		id        string
+		score     int64
+		rowNum    int64
+		createdAt int64
+		updatedAt int64
 	}
 	m := map[mapKey]mapValue{}
 
@@ -42,6 +44,8 @@ func main() {
 			competitionID := l[3][1 : len(l[3])-1]
 			score, _ := strconv.ParseInt(l[4], 10, 64)
 			rowNum, _ := strconv.ParseInt(l[5], 10, 64)
+			createdAt, _ := strconv.ParseInt(l[6], 10, 64)
+			updatedAt, _ := strconv.ParseInt(l[7][:len(l[7])-2], 10, 64)
 
 			k := mapKey{
 				tenantID:      tenantID,
@@ -49,9 +53,11 @@ func main() {
 				competitionID: competitionID,
 			}
 			v := mapValue{
-				id:     id,
-				score:  score,
-				rowNum: rowNum,
+				id:        id,
+				score:     score,
+				rowNum:    rowNum,
+				createdAt: createdAt,
+				updatedAt: updatedAt,
 			}
 
 			m[k] = v
@@ -59,7 +65,7 @@ func main() {
 	}
 
 	for k, v := range m {
-		s := fmt.Sprintf("INSERT INTO player_score VALUES('%s',%s,'%s','%s',%d,%d);", v.id, k.tenantID, k.playerID, k.competitionID, v.score, v.rowNum)
+		s := fmt.Sprintf("INSERT INTO player_score VALUES('%s',%s,'%s','%s',%d,%d,%d,%d);", v.id, k.tenantID, k.playerID, k.competitionID, v.score, v.rowNum, v.createdAt, v.updatedAt)
 		fa.Write([]byte(s + "\n"))
 	}
 }
