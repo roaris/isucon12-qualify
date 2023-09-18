@@ -1087,7 +1087,8 @@ func competitionScoreHandler(c echo.Context) error {
 		}
 	}
 
-	if _, err := tenantDB.ExecContext(
+	tx, _ := tenantDB.Beginx()
+	if _, err := tx.ExecContext(
 		ctx,
 		"DELETE FROM player_score WHERE tenant_id = ? AND competition_id = ?",
 		v.tenantID,
@@ -1096,7 +1097,7 @@ func competitionScoreHandler(c echo.Context) error {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
 	for playerID, val := range insertRowByPlayer {
-		if _, err := tenantDB.ExecContext(
+		if _, err := tx.ExecContext(
 			ctx,
 			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
 			val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, val.createdAt, val.updatedAt,
@@ -1108,6 +1109,7 @@ func competitionScoreHandler(c echo.Context) error {
 
 		}
 	}
+	tx.Commit()
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
