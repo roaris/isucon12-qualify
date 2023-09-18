@@ -585,8 +585,8 @@ func billingReportByCompetition(ctx context.Context, tenantDB dbOrTx, tenantID i
 	// }
 	// defer fl.Close()
 
-	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ"); err != nil {
-		return nil, fmt.Errorf("error lock table player_score: %w", err)
+	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ, player READ, competition READ"); err != nil {
+		return nil, fmt.Errorf("error lock table: %w", err)
 	}
 	defer func() {
 		if _, err := tenantDB.ExecContext(ctx, "UNLOCK TABLES"); err != nil {
@@ -1032,8 +1032,8 @@ func competitionScoreHandler(c echo.Context) error {
 	// }
 	// defer fl.Close()
 
-	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ"); err != nil {
-		return fmt.Errorf("error lock table player_score: %w", err)
+	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ, player READ, competition READ"); err != nil {
+		return fmt.Errorf("error lock table: %w", err)
 	}
 	defer func() {
 		if _, err := tenantDB.ExecContext(ctx, "UNLOCK TABLES"); err != nil {
@@ -1230,8 +1230,8 @@ func playerHandler(c echo.Context) error {
 	// }
 	// defer fl.Close()
 
-	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ"); err != nil {
-		return fmt.Errorf("error lock table player_score: %w", err)
+	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ, player READ, competition READ"); err != nil {
+		return fmt.Errorf("error lock table: %w", err)
 	}
 	defer func() {
 		if _, err := tenantDB.ExecContext(ctx, "UNLOCK TABLES"); err != nil {
@@ -1359,8 +1359,8 @@ func competitionRankingHandler(c echo.Context) error {
 	// }
 	// defer fl.Close()
 
-	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ"); err != nil {
-		return fmt.Errorf("error lock table player_score: %w", err)
+	if _, err := tenantDB.ExecContext(ctx, "LOCK TABLE player_score READ, player READ, competition READ"); err != nil {
+		return fmt.Errorf("error lock table: %w", err)
 	}
 	defer func() {
 		if _, err := tenantDB.ExecContext(ctx, "UNLOCK TABLES"); err != nil {
