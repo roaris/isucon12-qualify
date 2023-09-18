@@ -209,7 +209,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	adminDB.SetMaxOpenConns(30)
+	adminDB.SetMaxOpenConns(70)
 	defer adminDB.Close()
 
 	tenantDB, err = connectTenantMySQLDB()
@@ -217,7 +217,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	tenantDB.SetMaxOpenConns(30)
+	tenantDB.SetMaxOpenConns(70)
 	defer tenantDB.Close()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
