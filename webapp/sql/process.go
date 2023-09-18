@@ -54,10 +54,7 @@ func main() {
 				rowNum: rowNum,
 			}
 
-			_, ok := m[k]
-			if !ok || score > m[k].score {
-				m[k] = v
-			}
+			m[k] = v
 		}
 	}
 

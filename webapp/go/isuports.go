@@ -1026,9 +1026,9 @@ func competitionScoreHandler(c echo.Context) error {
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
 	type insertRow struct {
-		id        string
-		score     int64
-		rowNum    int64
+		id     string
+		score  int64
+		rowNum int64
 	}
 	insertRowByPlayer := map[string]insertRow{}
 	for {
@@ -1077,13 +1077,10 @@ func competitionScoreHandler(c echo.Context) error {
 			UpdatedAt:     now,
 		})
 
-		val, ok := insertRowByPlayer[playerID]
-		if !ok || score > val.score {
-			insertRowByPlayer[playerID] = insertRow{
-				id:        id,
-				score:     score,
-				rowNum:    rowNum,
-			}
+		insertRowByPlayer[playerID] = insertRow{
+			id:     id,
+			score:  score,
+			rowNum: rowNum,
 		}
 	}
 
