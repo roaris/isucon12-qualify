@@ -1,6 +1,8 @@
-DROP TABLE IF EXISTS competition;
-DROP TABLE IF EXISTS player;
-DROP TABLE IF EXISTS player_score;
+USE `isuports_tenant`;
+
+DROP TABLE IF EXISTS `competition`;
+DROP TABLE IF EXISTS `player`;
+DROP TABLE IF EXISTS `player_score`;
 
 CREATE TABLE competition (
   id VARCHAR(255) NOT NULL PRIMARY KEY,
