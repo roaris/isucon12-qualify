@@ -1027,11 +1027,14 @@ func competitionScoreHandler(c echo.Context) error {
 	var rowNum int64
 	playerScoreRows := []PlayerScoreRow{}
 	type insertRow struct {
-		id        string
-		score     int64
-		rowNum    int64
-		createdAt int64
-		updatedAt int64
+		ID            string `db:"id"`
+		TenantID      int64  `db:"tenant_id"`
+		PlayerID      string `db:"player_id"`
+		CompetitionID string `db:"competition_id"`
+		Score         int64  `db:"score"`
+		RowNum        int64  `db:"row_num"`
+		CreatedAt     int64  `db:"created_at"`
+		UpdatedAt     int64  `db:"updated_at"`
 	}
 	insertRowByPlayer := map[string]insertRow{}
 	for {
@@ -1081,11 +1084,14 @@ func competitionScoreHandler(c echo.Context) error {
 		})
 
 		insertRowByPlayer[playerID] = insertRow{
-			id:        id,
-			score:     score,
-			rowNum:    rowNum,
-			createdAt: now,
-			updatedAt: now,
+			ID:            id,
+			TenantID:      v.tenantID,
+			PlayerID:      playerID,
+			CompetitionID: competitionID,
+			Score:         score,
+			RowNum:        rowNum,
+			CreatedAt:     now,
+			UpdatedAt:     now,
 		}
 	}
 
@@ -1098,17 +1104,16 @@ func competitionScoreHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
-	for playerID, val := range insertRowByPlayer {
-		if _, err := tx.ExecContext(
-			ctx,
-			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-			val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, val.createdAt, val.updatedAt,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player_score: id=%s, tenant_id=%d, playerID=%s, competitionID=%s, score=%d, rowNum=%d, createdAt=%d, updatedAt=%d, %w",
-				val.id, v.tenantID, playerID, competitionID, val.score, val.rowNum, val.createdAt, val.updatedAt, err,
-			)
-		}
+	insertRows := make([]insertRow, 0, len(insertRowByPlayer))
+	for _, val := range insertRowByPlayer {
+		insertRows = append(insertRows, val)
+	}
+	if _, err := tx.NamedExecContext(
+		ctx,
+		"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
+		insertRows,
+	); err != nil {
+		return fmt.Errorf("error Bulk Insert player_score: %w", err)
 	}
 	tx.Commit()
 
