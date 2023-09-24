@@ -54,6 +54,8 @@ var (
 
 	// key: ((tenantID, competitionID), playerID)
 	visitMap = map[tenantAndCompetition]map[string]struct{}{}
+
+	globalID int64 = 2678400000
 )
 
 // 環境変数を取得する、なければデフォルト値を返す
@@ -118,28 +120,30 @@ func tenantDBPath(id int64) string {
 
 // システム全体で一意なIDを生成する
 func dispenseID(ctx context.Context) (string, error) {
-	var id int64
-	var lastErr error
-	for i := 0; i < 100; i++ {
-		var ret sql.Result
-		ret, err := adminDB.ExecContext(ctx, "REPLACE INTO id_generator (stub) VALUES (?);", "a")
-		if err != nil {
-			if merr, ok := err.(*mysql.MySQLError); ok && merr.Number == 1213 { // deadlock
-				lastErr = fmt.Errorf("error REPLACE INTO id_generator: %w", err)
-				continue
-			}
-			return "", fmt.Errorf("error REPLACE INTO id_generator: %w", err)
-		}
-		id, err = ret.LastInsertId()
-		if err != nil {
-			return "", fmt.Errorf("error ret.LastInsertId: %w", err)
-		}
-		break
-	}
-	if id != 0 {
-		return fmt.Sprintf("%x", id), nil
-	}
-	return "", lastErr
+	// var id int64
+	// var lastErr error
+	// for i := 0; i < 100; i++ {
+	// 	var ret sql.Result
+	// 	ret, err := adminDB.ExecContext(ctx, "REPLACE INTO id_generator (stub) VALUES (?);", "a")
+	// 	if err != nil {
+	// 		if merr, ok := err.(*mysql.MySQLError); ok && merr.Number == 1213 { // deadlock
+	// 			lastErr = fmt.Errorf("error REPLACE INTO id_generator: %w", err)
+	// 			continue
+	// 		}
+	// 		return "", fmt.Errorf("error REPLACE INTO id_generator: %w", err)
+	// 	}
+	// 	id, err = ret.LastInsertId()
+	// 	if err != nil {
+	// 		return "", fmt.Errorf("error ret.LastInsertId: %w", err)
+	// 	}
+	// 	break
+	// }
+	// if id != 0 {
+	// 	return fmt.Sprintf("%x", id), nil
+	// }
+	// return "", lastErr
+	globalID += 1
+	return fmt.Sprintf("%x", globalID), nil
 }
 
 // 全APIにCache-Control: privateを設定する
@@ -208,7 +212,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	adminDB.SetMaxOpenConns(150)
+	adminDB.SetMaxOpenConns(70)
 	defer adminDB.Close()
 
 	tenantDB, err = connectTenantMySQLDB()
@@ -216,7 +220,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	tenantDB.SetMaxOpenConns(150)
+	tenantDB.SetMaxOpenConns(70)
 	defer tenantDB.Close()
 
 	port := getEnv("SERVER_APP_PORT", "3000")
@@ -586,12 +590,11 @@ func billingReportByCompetition(ctx context.Context, tenantID int64, competitonI
 	// defer fl.Close()
 
 	// スコアを登録した参加者のIDを取得する
-	tx, _ := tenantDB.Beginx()
 	scoredPlayerIDs := []string{}
-	if err := tx.SelectContext(
+	if err := tenantDB.SelectContext(
 		ctx,
 		&scoredPlayerIDs,
-		"SELECT DISTINCT(player_id) FROM player_score WHERE tenant_id = ? AND competition_id = ? FOR SHARE",
+		"SELECT DISTINCT(player_id) FROM player_score WHERE tenant_id = ? AND competition_id = ?",
 		tenantID, comp.ID,
 	); err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
@@ -600,7 +603,6 @@ func billingReportByCompetition(ctx context.Context, tenantID int64, competitonI
 		// スコアが登録されている参加者
 		billingMap[pid] = "player"
 	}
-	tx.Commit()
 
 	// 大会が終了している場合のみ請求金額が確定するので計算する
 	var playerCount, visitorCount int64
@@ -1222,15 +1224,14 @@ func playerHandler(c echo.Context) error {
 	// 	return fmt.Errorf("error flockByTenantID: %w", err)
 	// }
 	// defer fl.Close()
-	tx, _ := tenantDB.Beginx()
 	pss := make([]PlayerScoreRow, 0, len(cs))
 	for _, c := range cs {
 		ps := PlayerScoreRow{}
-		if err := tx.GetContext(
+		if err := tenantDB.GetContext(
 			ctx,
 			&ps,
 			// 最後にCSVに登場したスコアを採用する = row_numが一番大きいもの
-			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? AND player_id = ? ORDER BY row_num DESC LIMIT 1 FOR SHARE",
+			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? AND player_id = ? ORDER BY row_num DESC LIMIT 1",
 			v.tenantID,
 			c.ID,
 			p.ID,
@@ -1243,7 +1244,6 @@ func playerHandler(c echo.Context) error {
 		}
 		pss = append(pss, ps)
 	}
-	tx.Commit()
 
 	psds := make([]PlayerScoreDetail, 0, len(pss))
 	for _, ps := range pss {
@@ -1344,18 +1344,16 @@ func competitionRankingHandler(c echo.Context) error {
 	// }
 	// defer fl.Close()
 
-	tx, _ := tenantDB.Beginx()
 	pss := []PlayerScoreRow{}
-	if err := tx.SelectContext(
+	if err := tenantDB.SelectContext(
 		ctx,
 		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY score DESC, row_num FOR SHARE",
+		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY score DESC, row_num",
 		tenant.ID,
 		competitionID,
 	); err != nil {
 		return fmt.Errorf("error Select player_score2: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
 	}
-	tx.Commit()
 
 	ranks := make([]CompetitionRank, 0, len(pss))
 	for _, ps := range pss {
