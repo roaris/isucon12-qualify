@@ -1356,18 +1356,41 @@ func competitionRankingHandler(c echo.Context) error {
 	}
 
 	ranks := make([]CompetitionRank, 0, len(pss))
-	for _, ps := range pss {
-		p, err := retrievePlayer(ctx, tenantDB, ps.PlayerID)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
+
+	if len(pss) > 0 { // 長さ0だとsqlx.Inでエラーになる
+		playerIDs := make([]string, 0, len(pss))
+
+		for _, ps := range pss {
+			playerIDs = append(playerIDs, ps.PlayerID)
 		}
-		ranks = append(ranks, CompetitionRank{
-			Score:             ps.Score,
-			PlayerID:          p.ID,
-			PlayerDisplayName: p.DisplayName,
-			RowNum:            ps.RowNum,
-		})
+
+		type playerIDAndName struct {
+			ID          string `db:"id"`
+			DisplayName string `db:"display_name"`
+		}
+		var playerIDAndNames []playerIDAndName
+
+		sql := "SELECT id, display_name FROM player WHERE id IN (?)"
+		sql, params, _ := sqlx.In(sql, playerIDs)
+		if err := tenantDB.SelectContext(ctx, &playerIDAndNames, sql, params...); err != nil {
+			return fmt.Errorf("error select player id and name: %w", err)
+		}
+
+		playerID2Name := map[string]string{}
+		for _, p := range playerIDAndNames {
+			playerID2Name[p.ID] = p.DisplayName
+		}
+
+		for _, ps := range pss {
+			ranks = append(ranks, CompetitionRank{
+				Score:             ps.Score,
+				PlayerID:          ps.PlayerID,
+				PlayerDisplayName: playerID2Name[ps.PlayerID],
+				RowNum:            ps.RowNum,
+			})
+		}
 	}
+
 	pagedRanks := make([]CompetitionRank, 0, 100)
 	for i, rank := range ranks {
 		if int64(i) < rankAfter {
