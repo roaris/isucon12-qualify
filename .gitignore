@@ -3,4 +3,5 @@ initial_data.tar.gz
 go/
 alp
 before.sql
-after.sql
+after1.sql
+after2.sql
