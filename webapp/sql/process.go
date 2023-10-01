@@ -10,11 +10,9 @@ import (
 
 func main() {
 	fb, _ := os.Open("before.sql")
-	fa1, _ := os.Create("after1.sql")
-	fa2, _ := os.Create("after2.sql")
+	fa, _ := os.Create("after.sql")
 	defer fb.Close()
-	defer fa1.Close()
-	defer fa2.Close()
+	defer fa.Close()
 
 	scanner := bufio.NewScanner(fb)
 
@@ -62,12 +60,12 @@ func main() {
 
 			m[k] = v
 		} else if strings.Index(s, "INSERT INTO player") != -1 || strings.Index(s, "INSERT INTO competition") != -1 {
-			fa1.Write([]byte(s + "\n"))
+			fa.Write([]byte(s + "\n"))
 		}
 	}
 
 	for k, v := range m {
 		s := fmt.Sprintf("INSERT INTO player_score VALUES('%s',%s,'%s','%s',%d,%d,%d,%d);", v.id, k.tenantID, k.playerID, k.competitionID, v.score, v.rowNum, v.createdAt, v.updatedAt)
-		fa2.Write([]byte(s + "\n"))
+		fa.Write([]byte(s + "\n"))
 	}
 }

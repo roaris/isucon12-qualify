@@ -7,25 +7,18 @@ for file in $files;
 do
 	./sqlite3-to-sql $file > before.sql
 	go run process.go
-	# competitionテーブルとplayerテーブルへのレコード追加
-	mysql -u"$ISUCON_DB_USER" \
-		-p"$ISUCON_DB_PASSWORD" \
-		--host "$ISUCON_DB_HOST1" \
-		--port "$ISUCON_DB_PORT" \
-		"isuports_tenant" < after1.sql
-	# player_scoreテーブルへのレコード追加
 	if [ $(( $i % 2 )) -eq 0 ]; then
 		mysql -u"$ISUCON_DB_USER" \
 			-p"$ISUCON_DB_PASSWORD" \
 			--host "$ISUCON_DB_HOST1" \
 			--port "$ISUCON_DB_PORT" \
-			"isuports_tenant" < after2.sql
+			"isuports_tenant" < after.sql
 	else
 		mysql -u"$ISUCON_DB_USER" \
 			-p"$ISUCON_DB_PASSWORD" \
 			--host "$ISUCON_DB_HOST2" \
 			--port "$ISUCON_DB_PORT" \
-			"isuports_tenant" < after2.sql
+			"isuports_tenant" < after.sql
 	fi
 	i=$(($i+1))
 	echo "$file finished ($i/100)"
