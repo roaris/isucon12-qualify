@@ -235,7 +235,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	tenantDB2.SetMaxOpenConns(70)
+	tenantDB2.SetMaxOpenConns(100)
 	defer tenantDB2.Close()
 
 	tenantDBs = append(tenantDBs, tenantDB1, tenantDB2)
@@ -1114,6 +1114,11 @@ func competitionScoreHandler(c echo.Context) error {
 			UpdatedAt:     now,
 		}
 	}
+	insertRows := make([]insertRow, 0, len(insertRowByPlayer))
+	for _, val := range insertRowByPlayer {
+		insertRows = append(insertRows, val)
+	}
+	sort.Slice(insertRows, func(i, j int) bool { return insertRows[i].ID < insertRows[j].ID })
 
 	tx, _ := tenantDBs[v.tenantID%2^1].Beginx()
 	if _, err := tx.ExecContext(
@@ -1124,11 +1129,6 @@ func competitionScoreHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
 	}
-	insertRows := make([]insertRow, 0, len(insertRowByPlayer))
-	for _, val := range insertRowByPlayer {
-		insertRows = append(insertRows, val)
-	}
-	sort.Slice(insertRows, func(i, j int) bool { return insertRows[i].ID < insertRows[j].ID })
 	if _, err := tx.NamedExecContext(
 		ctx,
 		"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
