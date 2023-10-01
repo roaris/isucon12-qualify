@@ -1226,37 +1226,50 @@ func playerHandler(c echo.Context) error {
 	// 	return fmt.Errorf("error flockByTenantID: %w", err)
 	// }
 	// defer fl.Close()
+
+	// SQLインジェクションを許容
 	pss := make([]PlayerScoreRow, 0, len(cs))
+	whereInArgs := make([]string, 0, len(cs))
 	for _, c := range cs {
-		ps := PlayerScoreRow{}
-		if err := tenantDB.GetContext(
-			ctx,
-			&ps,
-			// 最後にCSVに登場したスコアを採用する = row_numが一番大きいもの
-			"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? AND player_id = ? ORDER BY row_num DESC LIMIT 1",
-			v.tenantID,
-			c.ID,
-			p.ID,
-		); err != nil {
-			// 行がない = スコアが記録されてない
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			return fmt.Errorf("error Select player_score1: tenantID=%d, competitionID=%s, playerID=%s, %w", v.tenantID, c.ID, p.ID, err)
-		}
-		pss = append(pss, ps)
+		whereInArgs = append(whereInArgs, fmt.Sprintf("(%d, \"%s\", \"%s\")", v.tenantID, c.ID, p.ID))
+	}
+	inStmt := strings.Join(whereInArgs, ", ")
+	sqlStmt := fmt.Sprintf("SELECT * FROM player_score WHERE (tenant_id, competition_id, player_id) IN (%s)", inStmt)
+	if err := tenantDB.SelectContext(ctx, &pss, sqlStmt); err != nil {
+		return fmt.Errorf("error Select player_score, %w", err)
 	}
 
 	psds := make([]PlayerScoreDetail, 0, len(pss))
-	for _, ps := range pss {
-		comp, err := retrieveCompetition(ctx, tenantDB, ps.CompetitionID)
-		if err != nil {
-			return fmt.Errorf("error retrieveCompetition: %w", err)
+
+	if len(pss) > 0 { // 長さ0だとsqlx.Inでエラーになる
+		competitionIDs := make([]string, 0, len(pss))
+		for _, ps := range pss {
+			competitionIDs = append(competitionIDs, ps.CompetitionID)
 		}
-		psds = append(psds, PlayerScoreDetail{
-			CompetitionTitle: comp.Title,
-			Score:            ps.Score,
-		})
+
+		type competitionIDAndTitle struct {
+			ID    string `db:"id"`
+			Title string `db:"title"`
+		}
+		competitionIDAndTitles := make([]competitionIDAndTitle, 0, len(competitionIDs))
+
+		sqlStmt = "SELECT id, title FROM competition WHERE id IN (?)"
+		sqlStmt, params, _ := sqlx.In(sqlStmt, competitionIDs)
+		if err := tenantDB.SelectContext(ctx, &competitionIDAndTitles, sqlStmt, params...); err != nil {
+			return fmt.Errorf("error Select competition, %w", err)
+		}
+
+		competitionID2Title := map[string]string{}
+		for _, c := range competitionIDAndTitles {
+			competitionID2Title[c.ID] = c.Title
+		}
+
+		for _, ps := range pss {
+			psds = append(psds, PlayerScoreDetail{
+				CompetitionTitle: competitionID2Title[ps.CompetitionID],
+				Score:            ps.Score,
+			})
+		}
 	}
 
 	res := SuccessResult{
