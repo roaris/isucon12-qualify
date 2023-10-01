@@ -33,9 +33,7 @@ func main() {
 	for scanner.Scan() {
 		s := scanner.Text()
 
-		if strings.Index(s, "INSERT INTO player_score") == -1 {
-			fa.Write([]byte(s + "\n"))
-		} else {
+		if strings.Index(s, "INSERT INTO player_score") != -1 {
 			s = strings.Split(s, " ")[3]
 			l := strings.Split(s, ",")
 			id := l[0][len("VALUES('") : len(l[0])-1]
@@ -61,6 +59,8 @@ func main() {
 			}
 
 			m[k] = v
+		} else if strings.Index(s, "INSERT INTO player") != -1 || strings.Index(s, "INSERT INTO competition") != -1 {
+			fa.Write([]byte(s + "\n"))
 		}
 	}
 
