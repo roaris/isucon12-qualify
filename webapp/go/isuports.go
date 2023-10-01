@@ -51,10 +51,7 @@ var (
 	adminDB *sqlx.DB
 	/*
 		tenantテーブル : 10.0.0.182
-		competitionテーブル : 10.0.0.182
-		playerテーブル : 10.0.0.182
-		player_scoreテーブル(tenant_idが奇数) : 10.0.0.182
-		player_scoreテーブル(tenant_idが偶数) : 10.0.0.137
+		competitionテーブル, playerテーブル, player_scoreテーブルはtenant_idが奇数なら10.0.0.182, 偶数なら10.0.0.137
 	*/
 	DB1Host   = "10.0.0.182"
 	DB2Host   = "10.0.0.137"
