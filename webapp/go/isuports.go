@@ -1136,7 +1136,9 @@ func competitionScoreHandler(c echo.Context) error {
 	); err != nil {
 		return fmt.Errorf("error Bulk Insert player_score: %w", err)
 	}
-	tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error transaction: %w", err)
+	}
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
