@@ -1240,15 +1240,36 @@ func playerHandler(c echo.Context) error {
 	}
 
 	psds := make([]PlayerScoreDetail, 0, len(pss))
-	for _, ps := range pss {
-		comp, err := retrieveCompetition(ctx, tenantDB, ps.CompetitionID)
-		if err != nil {
-			return fmt.Errorf("error retrieveCompetition: %w", err)
+
+	if len(pss) > 0 { // 長さ0だとsqlx.Inでエラーになる
+		competitionIDs := make([]string, 0, len(pss))
+		for _, ps := range pss {
+			competitionIDs = append(competitionIDs, ps.CompetitionID)
 		}
-		psds = append(psds, PlayerScoreDetail{
-			CompetitionTitle: comp.Title,
-			Score:            ps.Score,
-		})
+
+		type competitionIDAndTitle struct {
+			ID    string `db:"id"`
+			Title string `db:"title"`
+		}
+		competitionIDAndTitles := make([]competitionIDAndTitle, 0, len(competitionIDs))
+
+		sqlStmt = "SELECT id, title FROM competition WHERE id IN (?)"
+		sqlStmt, params, _ := sqlx.In(sqlStmt, competitionIDs)
+		if err := tenantDB.SelectContext(ctx, &competitionIDAndTitles, sqlStmt, params...); err != nil {
+			return fmt.Errorf("error Select competition, %w", err)
+		}
+
+		competitionID2Title := map[string]string{}
+		for _, c := range competitionIDAndTitles {
+			competitionID2Title[c.ID] = c.Title
+		}
+
+		for _, ps := range pss {
+			psds = append(psds, PlayerScoreDetail{
+				CompetitionTitle: competitionID2Title[ps.CompetitionID],
+				Score:            ps.Score,
+			})
+		}
 	}
 
 	res := SuccessResult{
