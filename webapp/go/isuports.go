@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -39,9 +40,63 @@ const (
 	RoleNone      = "none"
 )
 
-type tenantAndCompetition struct {
-	tenantID      int64
-	competitionID string
+type visitMapStruct struct {
+	data  map[string]map[string]struct{}
+	mutex sync.Mutex
+}
+
+func (v *visitMapStruct) get(competitionID string) []string {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	var playerIDs []string
+	for playerID := range v.data[competitionID] {
+		playerIDs = append(playerIDs, playerID)
+	}
+	return playerIDs
+}
+
+func (v *visitMapStruct) set(competitionID string, playerID string) {
+	v.mutex.Lock()
+	defer v.mutex.Unlock()
+	_, ok := v.data[competitionID]
+	if !ok {
+		v.data[competitionID] = map[string]struct{}{}
+	}
+	v.data[competitionID][playerID] = struct{}{}
+}
+
+type competitionID2TitleStruct struct {
+	data  map[string]string
+	mutex sync.Mutex
+}
+
+func (c *competitionID2TitleStruct) get(competitionID string) string {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	return c.data[competitionID]
+}
+
+func (c *competitionID2TitleStruct) set(competitionID string, title string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+	c.data[competitionID] = title
+}
+
+type playerID2NameStruct struct {
+	data  map[string]string
+	mutex sync.Mutex
+}
+
+func (p *playerID2NameStruct) get(playerID string) string {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	return p.data[playerID]
+}
+
+func (p *playerID2NameStruct) set(playerID string, name string) {
+	p.mutex.Lock()
+	defer p.mutex.Unlock()
+	p.data[playerID] = name
 }
 
 var (
@@ -59,12 +114,18 @@ var (
 
 	sqliteDriverName = "sqlite3"
 
-	// key: ((tenantID, competitionID), playerID)
-	visitMap = map[tenantAndCompetition]map[string]struct{}{}
-	// key: competitionID value: competitionTitle
-	competitionID2Title = map[string]string{}
-	// key: playerID value: playerName
-	playerID2Name = map[string]string{}
+	visitMap = visitMapStruct{
+		data: map[string]map[string]struct{}{},
+	}
+	competitionID2Title = competitionID2TitleStruct{
+		data: map[string]string{},
+	}
+	playerID2Name = playerID2NameStruct{
+		data: map[string]string{},
+	}
+
+	// mutex
+	bulkInsertMutex sync.Mutex
 
 	globalID int64 = 2678400000
 )
@@ -597,9 +658,8 @@ func billingReportByCompetition(ctx context.Context, tenantID int64, competitonI
 	}
 
 	// ランキングにアクセスした参加者のIDを取得する
-	k := tenantAndCompetition{tenantID: tenantID, competitionID: competitonID}
 	billingMap := map[string]string{}
-	for playerID := range visitMap[k] {
+	for _, playerID := range visitMap.get(competitonID) {
 		billingMap[playerID] = "visitor"
 	}
 
@@ -840,7 +900,7 @@ func playersAddHandler(c echo.Context) error {
 			DisplayName:    p.DisplayName,
 			IsDisqualified: p.IsDisqualified,
 		})
-		playerID2Name[p.ID] = p.DisplayName
+		playerID2Name.set(p.ID, p.DisplayName)
 	}
 
 	res := PlayersAddHandlerResult{
@@ -938,7 +998,7 @@ func competitionsAddHandler(c echo.Context) error {
 		)
 	}
 
-	competitionID2Title[id] = title
+	competitionID2Title.set(id, title)
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
 			ID:         id,
@@ -1126,6 +1186,8 @@ func competitionScoreHandler(c echo.Context) error {
 	}
 	sort.Slice(insertRows, func(i, j int) bool { return insertRows[i].ID < insertRows[j].ID })
 
+	bulkInsertMutex.Lock()
+	defer bulkInsertMutex.Unlock()
 	tx, _ := tenantDBs[v.tenantID%2^1].Beginx()
 	if _, err := tx.ExecContext(
 		ctx,
@@ -1291,7 +1353,7 @@ func playerHandler(c echo.Context) error {
 
 		for _, ps := range pss {
 			psds = append(psds, PlayerScoreDetail{
-				CompetitionTitle: competitionID2Title[ps.CompetitionID],
+				CompetitionTitle: competitionID2Title.get(ps.CompetitionID),
 				Score:            ps.Score,
 			})
 		}
@@ -1362,11 +1424,7 @@ func competitionRankingHandler(c echo.Context) error {
 	}
 
 	if !competition.FinishedAt.Valid || (now <= competition.FinishedAt.Int64) { // 大会開催内のみ記録する
-		k := tenantAndCompetition{tenantID: tenant.ID, competitionID: competitionID}
-		if _, ok := visitMap[k]; !ok {
-			visitMap[k] = map[string]struct{}{}
-		}
-		visitMap[k][v.playerID] = struct{}{}
+		visitMap.set(competitionID, v.playerID)
 	}
 
 	var rankAfter int64
@@ -1423,7 +1481,7 @@ func competitionRankingHandler(c echo.Context) error {
 			ranks = append(ranks, CompetitionRank{
 				Score:             ps.Score,
 				PlayerID:          ps.PlayerID,
-				PlayerDisplayName: playerID2Name[ps.PlayerID],
+				PlayerDisplayName: playerID2Name.get(ps.PlayerID),
 				RowNum:            ps.RowNum,
 			})
 		}
@@ -1640,11 +1698,7 @@ func initializeHandler(c echo.Context) error {
 	}
 
 	for _, sqlResult := range sqlResults1 {
-		k := tenantAndCompetition{tenantID: sqlResult.TenantID, competitionID: sqlResult.CompetitionID}
-		if _, ok := visitMap[k]; !ok {
-			visitMap[k] = map[string]struct{}{}
-		}
-		visitMap[k][sqlResult.PlayerID] = struct{}{}
+		visitMap.set(sqlResult.CompetitionID, sqlResult.PlayerID)
 	}
 
 	type sqlResult2 struct {
@@ -1660,7 +1714,7 @@ func initializeHandler(c echo.Context) error {
 		return fmt.Errorf("select competition from tenantDB0 failed: %e", err)
 	}
 	for _, sqlResult := range sqlResults2 {
-		competitionID2Title[sqlResult.CompetitionID] = sqlResult.CompetitionTitle
+		competitionID2Title.set(sqlResult.CompetitionID, sqlResult.CompetitionTitle)
 	}
 	sqlResults2 = nil
 	if err := tenantDBs[1].SelectContext(
@@ -1671,7 +1725,7 @@ func initializeHandler(c echo.Context) error {
 		return fmt.Errorf("select competition from tenantDB1 failed: %e", err)
 	}
 	for _, sqlResult := range sqlResults2 {
-		competitionID2Title[sqlResult.CompetitionID] = sqlResult.CompetitionTitle
+		competitionID2Title.set(sqlResult.CompetitionID, sqlResult.CompetitionTitle)
 	}
 
 	type sqlResult3 struct {
@@ -1687,7 +1741,7 @@ func initializeHandler(c echo.Context) error {
 		return fmt.Errorf("select player from tenantDB0 failed: %e", err)
 	}
 	for _, sqlResult := range sqlResults3 {
-		playerID2Name[sqlResult.PlayerID] = sqlResult.PlayerName
+		playerID2Name.set(sqlResult.PlayerID, sqlResult.PlayerName)
 	}
 	sqlResults3 = nil
 	if err := tenantDBs[1].SelectContext(
@@ -1698,7 +1752,7 @@ func initializeHandler(c echo.Context) error {
 		return fmt.Errorf("select player from tenantDB1 failed: %e", err)
 	}
 	for _, sqlResult := range sqlResults3 {
-		playerID2Name[sqlResult.PlayerID] = sqlResult.PlayerName
+		playerID2Name.set(sqlResult.PlayerID, sqlResult.PlayerName)
 	}
 
 	res := InitializeHandlerResult{
