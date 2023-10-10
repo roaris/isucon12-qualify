@@ -63,6 +63,8 @@ var (
 	visitMap = map[tenantAndCompetition]map[string]struct{}{}
 	// key: competitionID value: competitionTitle
 	competitionID2Title = map[string]string{}
+	// key: playerID value: playerName
+	playerID2Name = map[string]string{}
 
 	globalID int64 = 2678400000
 )
@@ -838,6 +840,7 @@ func playersAddHandler(c echo.Context) error {
 			DisplayName:    p.DisplayName,
 			IsDisqualified: p.IsDisqualified,
 		})
+		playerID2Name[p.ID] = p.DisplayName
 	}
 
 	res := PlayersAddHandlerResult{
@@ -1395,26 +1398,26 @@ func competitionRankingHandler(c echo.Context) error {
 	ranks := make([]CompetitionRank, 0, len(pss))
 
 	if len(pss) > 0 { // 長さ0だとsqlx.Inでエラーになる
-		playerIDs := make([]string, 0, len(pss))
-		for _, ps := range pss {
-			playerIDs = append(playerIDs, ps.PlayerID)
-		}
+		// playerIDs := make([]string, 0, len(pss))
+		// for _, ps := range pss {
+		// 	playerIDs = append(playerIDs, ps.PlayerID)
+		// }
 
-		type playerIDAndName struct {
-			ID          string `db:"id"`
-			DisplayName string `db:"display_name"`
-		}
-		playerIDAndNames := make([]playerIDAndName, 0, len(playerIDs))
-		sqlStmt := "SELECT id, display_name FROM player WHERE id IN (?)"
-		sqlStmt, params, _ := sqlx.In(sqlStmt, playerIDs)
-		if err := tenantDBs[v.tenantID%2^1].SelectContext(ctx, &playerIDAndNames, sqlStmt, params...); err != nil {
-			return fmt.Errorf("error select player id and name: %w", err)
-		}
+		// type playerIDAndName struct {
+		// 	ID          string `db:"id"`
+		// 	DisplayName string `db:"display_name"`
+		// }
+		// playerIDAndNames := make([]playerIDAndName, 0, len(playerIDs))
+		// sqlStmt := "SELECT id, display_name FROM player WHERE id IN (?)"
+		// sqlStmt, params, _ := sqlx.In(sqlStmt, playerIDs)
+		// if err := tenantDBs[v.tenantID%2^1].SelectContext(ctx, &playerIDAndNames, sqlStmt, params...); err != nil {
+		// 	return fmt.Errorf("error select player id and name: %w", err)
+		// }
 
-		playerID2Name := map[string]string{}
-		for _, p := range playerIDAndNames {
-			playerID2Name[p.ID] = p.DisplayName
-		}
+		// playerID2Name := map[string]string{}
+		// for _, p := range playerIDAndNames {
+		// 	playerID2Name[p.ID] = p.DisplayName
+		// }
 
 		for _, ps := range pss {
 			ranks = append(ranks, CompetitionRank{
@@ -1669,6 +1672,33 @@ func initializeHandler(c echo.Context) error {
 	}
 	for _, sqlResult := range sqlResults2 {
 		competitionID2Title[sqlResult.CompetitionID] = sqlResult.CompetitionTitle
+	}
+
+	type sqlResult3 struct {
+		PlayerID   string `db:"id"`
+		PlayerName string `db:"display_name"`
+	}
+	var sqlResults3 []sqlResult3
+	if err := tenantDBs[0].SelectContext(
+		context.Background(),
+		&sqlResults3,
+		"SELECT id, display_name FROM player",
+	); err != nil {
+		return fmt.Errorf("select player from tenantDB0 failed: %e", err)
+	}
+	for _, sqlResult := range sqlResults3 {
+		playerID2Name[sqlResult.PlayerID] = sqlResult.PlayerName
+	}
+	sqlResults3 = nil
+	if err := tenantDBs[1].SelectContext(
+		context.Background(),
+		&sqlResults3,
+		"SELECT id, display_name FROM player",
+	); err != nil {
+		return fmt.Errorf("select player from tenantDB1 failed: %e", err)
+	}
+	for _, sqlResult := range sqlResults3 {
+		playerID2Name[sqlResult.PlayerID] = sqlResult.PlayerName
 	}
 
 	res := InitializeHandlerResult{
