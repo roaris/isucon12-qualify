@@ -61,6 +61,8 @@ var (
 
 	// key: ((tenantID, competitionID), playerID)
 	visitMap = map[tenantAndCompetition]map[string]struct{}{}
+	// key: competitionID value: competitionTitle
+	competitionID2Title = map[string]string{}
 
 	globalID int64 = 2678400000
 )
@@ -933,6 +935,7 @@ func competitionsAddHandler(c echo.Context) error {
 		)
 	}
 
+	competitionID2Title[id] = title
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
 			ID:         id,
@@ -1261,27 +1264,27 @@ func playerHandler(c echo.Context) error {
 	psds := make([]PlayerScoreDetail, 0, len(pss))
 
 	if len(pss) > 0 { // 長さ0だとsqlx.Inでエラーになる
-		competitionIDs := make([]string, 0, len(pss))
-		for _, ps := range pss {
-			competitionIDs = append(competitionIDs, ps.CompetitionID)
-		}
+		// competitionIDs := make([]string, 0, len(pss))
+		// for _, ps := range pss {
+		// 	competitionIDs = append(competitionIDs, ps.CompetitionID)
+		// }
 
-		type competitionIDAndTitle struct {
-			ID    string `db:"id"`
-			Title string `db:"title"`
-		}
-		competitionIDAndTitles := make([]competitionIDAndTitle, 0, len(competitionIDs))
+		// type competitionIDAndTitle struct {
+		// 	ID    string `db:"id"`
+		// 	Title string `db:"title"`
+		// }
+		// competitionIDAndTitles := make([]competitionIDAndTitle, 0, len(competitionIDs))
 
-		sqlStmt = "SELECT id, title FROM competition WHERE id IN (?)"
-		sqlStmt, params, _ := sqlx.In(sqlStmt, competitionIDs)
-		if err := tenantDBs[v.tenantID%2^1].SelectContext(ctx, &competitionIDAndTitles, sqlStmt, params...); err != nil {
-			return fmt.Errorf("error Select competition, %w", err)
-		}
+		// sqlStmt = "SELECT id, title FROM competition WHERE id IN (?)"
+		// sqlStmt, params, _ := sqlx.In(sqlStmt, competitionIDs)
+		// if err := tenantDBs[v.tenantID%2^1].SelectContext(ctx, &competitionIDAndTitles, sqlStmt, params...); err != nil {
+		// 	return fmt.Errorf("error Select competition, %w", err)
+		// }
 
-		competitionID2Title := map[string]string{}
-		for _, c := range competitionIDAndTitles {
-			competitionID2Title[c.ID] = c.Title
-		}
+		// competitionID2Title := map[string]string{}
+		// for _, c := range competitionIDAndTitles {
+		// 	competitionID2Title[c.ID] = c.Title
+		// }
 
 		for _, ps := range pss {
 			psds = append(psds, PlayerScoreDetail{
@@ -1619,26 +1622,53 @@ func initializeHandler(c echo.Context) error {
 	if err != nil {
 		return fmt.Errorf("error exec.Command: %s %e", string(out), err)
 	}
-	type sqlResult struct {
+	type sqlResult1 struct {
 		PlayerID      string `db:"player_id"`
 		TenantID      int64  `db:"tenant_id"`
 		CompetitionID string `db:"competition_id"`
 	}
-	var sqlResults []sqlResult
+	var sqlResults1 []sqlResult1
 	if err := adminDB.SelectContext(
 		context.Background(),
-		&sqlResults,
+		&sqlResults1,
 		"SELECT player_id, tenant_id, competition_id FROM visit_history",
 	); err != nil {
 		return fmt.Errorf("select visit history failed: %e", err)
 	}
 
-	for _, sqlResult := range sqlResults {
+	for _, sqlResult := range sqlResults1 {
 		k := tenantAndCompetition{tenantID: sqlResult.TenantID, competitionID: sqlResult.CompetitionID}
 		if _, ok := visitMap[k]; !ok {
 			visitMap[k] = map[string]struct{}{}
 		}
 		visitMap[k][sqlResult.PlayerID] = struct{}{}
+	}
+
+	type sqlResult2 struct {
+		CompetitionID    string `db:"id"`
+		CompetitionTitle string `db:"title"`
+	}
+	var sqlResults2 []sqlResult2
+	if err := tenantDBs[0].SelectContext(
+		context.Background(),
+		&sqlResults2,
+		"SELECT id, title FROM competition",
+	); err != nil {
+		return fmt.Errorf("select competition from tenantDB0 failed: %e", err)
+	}
+	for _, sqlResult := range sqlResults2 {
+		competitionID2Title[sqlResult.CompetitionID] = sqlResult.CompetitionTitle
+	}
+	sqlResults2 = nil
+	if err := tenantDBs[1].SelectContext(
+		context.Background(),
+		&sqlResults2,
+		"SELECT id, title FROM competition",
+	); err != nil {
+		return fmt.Errorf("select competition from tenantDB1 failed: %e", err)
+	}
+	for _, sqlResult := range sqlResults2 {
+		competitionID2Title[sqlResult.CompetitionID] = sqlResult.CompetitionTitle
 	}
 
 	res := InitializeHandlerResult{
