@@ -1118,19 +1118,13 @@ func competitionScoreHandler(c echo.Context) error {
 	// 	return fmt.Errorf("error flockByTenantID: %w", err)
 	// }
 	// defer fl.Close()
+
 	var rowNum int64
-	playerScoreRows := []PlayerScoreRow{}
-	type insertRow struct {
-		ID            string `db:"id"`
-		TenantID      int64  `db:"tenant_id"`
-		PlayerID      string `db:"player_id"`
-		CompetitionID string `db:"competition_id"`
-		Score         int64  `db:"score"`
-		RowNum        int64  `db:"row_num"`
-		CreatedAt     int64  `db:"created_at"`
-		UpdatedAt     int64  `db:"updated_at"`
+	type playerIDAndScore struct {
+		playerID string
+		score    int64
 	}
-	insertRowByPlayer := map[string]insertRow{}
+	var playerIDAndScores []playerIDAndScore
 	for {
 		rowNum++
 		row, err := r.Read()
@@ -1144,16 +1138,6 @@ func competitionScoreHandler(c echo.Context) error {
 			return fmt.Errorf("row must have two columns: %#v", row)
 		}
 		playerID, scoreStr := row[0], row[1]
-		if _, err := retrievePlayer(ctx, tenantDBs[v.tenantID%2^1], playerID); err != nil {
-			// 存在しない参加者が含まれている
-			if errors.Is(err, sql.ErrNoRows) {
-				return echo.NewHTTPError(
-					http.StatusBadRequest,
-					fmt.Sprintf("player not found: %s", playerID),
-				)
-			}
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
 		var score int64
 		if score, err = strconv.ParseInt(scoreStr, 10, 64); err != nil {
 			return echo.NewHTTPError(
@@ -1161,6 +1145,65 @@ func competitionScoreHandler(c echo.Context) error {
 				fmt.Sprintf("error strconv.ParseUint: scoreStr=%s, %s", scoreStr, err),
 			)
 		}
+		playerIDAndScores = append(playerIDAndScores, playerIDAndScore{
+			playerID: playerID,
+			score:    score,
+		})
+	}
+
+	playerIDSet := map[string]struct{}{}
+	var playerIDs []string
+	for _, val := range playerIDAndScores {
+		if _, ok := playerIDSet[val.playerID]; !ok {
+			playerIDSet[val.playerID] = struct{}{}
+			playerIDs = append(playerIDs, val.playerID)
+		}
+	}
+
+	if len(playerIDs) > 0 {
+		sqlStmt := "SELECT id FROM player WHERE id IN (?)"
+		sqlStmt, params, _ := sqlx.In(sqlStmt, playerIDs)
+		var retrivePlayerIDs1 []string
+		var retrivePlayerIDs2 []string
+		if err := tenantDBs[0].SelectContext(ctx, &retrivePlayerIDs1, sqlStmt, params...); err != nil {
+			return fmt.Errorf("error retrievePlayer from tenantDB0: %w", err)
+		}
+		if err := tenantDBs[1].SelectContext(ctx, &retrivePlayerIDs2, sqlStmt, params...); err != nil {
+			return fmt.Errorf("error retrievePlayer from tenantDB1: %w", err)
+		}
+
+		retrivePlayerIDSet := map[string]struct{}{}
+		for _, playerID := range retrivePlayerIDs1 {
+			retrivePlayerIDSet[playerID] = struct{}{}
+		}
+		for _, playerID := range retrivePlayerIDs2 {
+			retrivePlayerIDSet[playerID] = struct{}{}
+		}
+		for _, playerID := range playerIDs {
+			if _, ok := retrivePlayerIDSet[playerID]; !ok {
+				return echo.NewHTTPError(
+					http.StatusBadRequest,
+					fmt.Sprintf("player not found: %s", playerID),
+				)
+			}
+		}
+	}
+
+	playerScoreRows := []PlayerScoreRow{}
+	type insertRow struct {
+		ID            string `db:"id"`
+		TenantID      int64  `db:"tenant_id"`
+		PlayerID      string `db:"player_id"`
+		CompetitionID string `db:"competition_id"`
+		Score         int64  `db:"score"`
+		RowNum        int64  `db:"row_num"`
+		CreatedAt     int64  `db:"created_at"`
+		UpdatedAt     int64  `db:"updated_at"`
+	}
+	insertRowByPlayer := map[string]insertRow{}
+	for _, val := range playerIDAndScores {
+		playerID := val.playerID
+		score := val.score
 		id, err := dispenseID(ctx)
 		if err != nil {
 			return fmt.Errorf("error dispenseID: %w", err)
