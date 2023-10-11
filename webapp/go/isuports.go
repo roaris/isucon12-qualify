@@ -683,8 +683,8 @@ func billingReportByCompetition(ctx context.Context, tenantID int64, competitonI
 	if err := tenantDBs[tenantID%2^1].SelectContext(
 		ctx,
 		&scoredPlayerIDs,
-		"SELECT DISTINCT(player_id) FROM player_score WHERE tenant_id = ? AND competition_id = ?",
-		tenantID, comp.ID,
+		"SELECT DISTINCT(player_id) FROM player_score WHERE competition_id = ?",
+		comp.ID,
 	); err != nil && err != sql.ErrNoRows {
 		return nil, fmt.Errorf("error Select count player_score: tenantID=%d, competitionID=%s, %w", tenantID, competitonID, err)
 	}
@@ -1242,8 +1242,7 @@ func competitionScoreHandler(c echo.Context) error {
 	tx, _ := tenantDBs[v.tenantID%2^1].Beginx()
 	if _, err := tx.ExecContext(
 		ctx,
-		"DELETE FROM player_score WHERE tenant_id = ? AND competition_id = ?",
-		v.tenantID,
+		"DELETE FROM player_score WHERE competition_id = ?",
 		competitionID,
 	); err != nil {
 		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
@@ -1469,10 +1468,10 @@ func competitionRankingHandler(c echo.Context) error {
 	}
 
 	now := time.Now().Unix()
-	var tenant TenantRow
-	if err := adminDB.GetContext(ctx, &tenant, "SELECT * FROM tenant WHERE id = ?", v.tenantID); err != nil {
-		return fmt.Errorf("error Select tenant: id=%d, %w", v.tenantID, err)
-	}
+	// var tenant TenantRow
+	// if err := adminDB.GetContext(ctx, &tenant, "SELECT * FROM tenant WHERE id = ?", v.tenantID); err != nil {
+	// 	return fmt.Errorf("error Select tenant: id=%d, %w", v.tenantID, err)
+	// }
 
 	if !competition.FinishedAt.Valid || (now <= competition.FinishedAt.Int64) { // 大会開催内のみ記録する
 		visitMap.set(competitionID, v.playerID)
@@ -1497,11 +1496,11 @@ func competitionRankingHandler(c echo.Context) error {
 	if err := tenantDBs[v.tenantID%2^1].SelectContext(
 		ctx,
 		&pss,
-		"SELECT * FROM player_score WHERE tenant_id = ? AND competition_id = ? ORDER BY score DESC, row_num",
-		tenant.ID,
+		"SELECT * FROM player_score WHERE competition_id = ? ORDER BY score DESC, row_num LIMIT 100 OFFSET ?",
 		competitionID,
+		rankAfter,
 	); err != nil {
-		return fmt.Errorf("error Select player_score2: tenantID=%d, competitionID=%s, %w", tenant.ID, competitionID, err)
+		return fmt.Errorf("error Select player_score2: competitionID=%s, rankafter=%d, %w", competitionID, rankAfter, err)
 	}
 
 	ranks := make([]CompetitionRank, 0, len(pss))
@@ -1540,18 +1539,12 @@ func competitionRankingHandler(c echo.Context) error {
 
 	pagedRanks := make([]CompetitionRank, 0, 100)
 	for i, rank := range ranks {
-		if int64(i) < rankAfter {
-			continue
-		}
 		pagedRanks = append(pagedRanks, CompetitionRank{
-			Rank:              int64(i + 1),
+			Rank:              rankAfter + int64(i + 1),
 			Score:             rank.Score,
 			PlayerID:          rank.PlayerID,
 			PlayerDisplayName: rank.PlayerDisplayName,
 		})
-		if len(pagedRanks) >= 100 {
-			break
-		}
 	}
 
 	res := SuccessResult{
