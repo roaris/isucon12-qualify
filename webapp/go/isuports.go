@@ -300,7 +300,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	tenantDB1.SetMaxOpenConns(70)
+	tenantDB1.SetMaxOpenConns(100)
 	defer tenantDB1.Close()
 
 	tenantDB2, err := connectTenantMySQLDB(DB2Host)
@@ -308,7 +308,7 @@ func Run() {
 		e.Logger.Fatalf("failed to connect db: %v", err)
 		return
 	}
-	tenantDB2.SetMaxOpenConns(100)
+	tenantDB2.SetMaxOpenConns(120)
 	defer tenantDB2.Close()
 
 	tenantDBs = append(tenantDBs, tenantDB1, tenantDB2)
