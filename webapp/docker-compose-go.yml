@@ -8,6 +8,7 @@ services:
       ISUCON_DB_USER: isucon
       ISUCON_DB_PASSWORD: isucon
       ISUCON_DB_NAME: isuports
+      PPROF: 1
     network_mode: host
     volumes:
       - /home/isucon/isucon12-qualify/webapp/tenant_db:/home/isucon/isucon12-qualify/webapp/tenant_db
@@ -16,3 +17,5 @@ services:
       - /home/isucon/isucon12-qualify/initial_data:/home/isucon/isucon12-qualify/initial_data
       - /home/isucon/isucon12-qualify/tmp:/home/isucon/isucon12-qualify/tmp
     init: true
+    ports:
+      - "127.0.0.1:1080:1080"

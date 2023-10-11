@@ -8,7 +8,8 @@ RUN apt-get update && \
   wget -q https://dev.mysql.com/get/mysql-apt-config_0.8.22-1_all.deb && \
   apt-get -y install ./mysql-apt-config_*_all.deb && \
   apt-get -y update && \
-  apt-get -y install mysql-client
+  apt-get -y install mysql-client && \
+  apt-get -y install graphviz
 
 RUN useradd --uid=1001 --create-home isucon
 USER isucon
@@ -20,4 +21,5 @@ COPY --chown=isucon:isucon ./ /home/isucon/isucon12-qualify/webapp/go/
 ENV GOPATH=/home/isucon/tmp/go
 ENV GOCACHE=/home/isucon/tmp/go/.cache
 
-CMD ["go", "run", "./cmd/isuports/main.go"]
+RUN go build ./cmd/isuports/main.go
+CMD ["./main"]
