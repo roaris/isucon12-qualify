@@ -899,16 +899,16 @@ func playersAddHandler(c echo.Context) error {
 				id, displayName, false, now, now, err,
 			)
 		}
-		p, err := retrievePlayer(ctx, tenantDBs[v.tenantID%2^1], id)
-		if err != nil {
-			return fmt.Errorf("error retrievePlayer: %w", err)
-		}
+		// p, err := retrievePlayer(ctx, tenantDBs[v.tenantID%2^1], id)
+		// if err != nil {
+		// 	return fmt.Errorf("error retrievePlayer: %w", err)
+		// }
 		pds = append(pds, PlayerDetail{
-			ID:             p.ID,
-			DisplayName:    p.DisplayName,
-			IsDisqualified: p.IsDisqualified,
+			ID:             id,
+			DisplayName:    displayName,
+			IsDisqualified: false,
 		})
-		playerID2Name.set(p.ID, p.DisplayName)
+		playerID2Name.set(id, displayName)
 	}
 
 	res := PlayersAddHandlerResult{
