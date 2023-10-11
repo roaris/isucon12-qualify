@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -42,12 +43,12 @@ const (
 
 type visitMapStruct struct {
 	data  map[string]map[string]struct{}
-	mutex sync.Mutex
+	mutex sync.RWMutex
 }
 
 func (v *visitMapStruct) get(competitionID string) []string {
-	v.mutex.Lock()
-	defer v.mutex.Unlock()
+	v.mutex.RLock()
+	defer v.mutex.RUnlock()
 	var playerIDs []string
 	for playerID := range v.data[competitionID] {
 		playerIDs = append(playerIDs, playerID)
@@ -67,12 +68,12 @@ func (v *visitMapStruct) set(competitionID string, playerID string) {
 
 type competitionID2TitleStruct struct {
 	data  map[string]string
-	mutex sync.Mutex
+	mutex sync.RWMutex
 }
 
 func (c *competitionID2TitleStruct) get(competitionID string) string {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
 	return c.data[competitionID]
 }
 
@@ -84,12 +85,12 @@ func (c *competitionID2TitleStruct) set(competitionID string, title string) {
 
 type playerID2NameStruct struct {
 	data  map[string]string
-	mutex sync.Mutex
+	mutex sync.RWMutex
 }
 
 func (p *playerID2NameStruct) get(playerID string) string {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+	p.mutex.RLock()
+	defer p.mutex.RUnlock()
 	return p.data[playerID]
 }
 
@@ -214,7 +215,7 @@ func dispenseID(ctx context.Context) (string, error) {
 	// 	return fmt.Sprintf("%x", id), nil
 	// }
 	// return "", lastErr
-	globalID += 1
+	atomic.AddInt64(&globalID, 1)
 	return fmt.Sprintf("%x", globalID), nil
 }
 
