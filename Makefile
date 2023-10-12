@@ -29,5 +29,5 @@ enable-pprof:
 disable-pprof:
 	sed -i -e 's/PPROF=1/PPROF=0/' env.sh
 
-start-pprof: enable-pprof deploy
-	go tool pprof -http=0.0.0.0:1080 ~/webapp/go/isucholar http://localhost:6060/debug/pprof/profile?seconds=80
+start-pprof:
+	docker compose -f=webapp/docker-compose-go.yml exec webapp go tool pprof -http=0.0.0.0:1080 main http://localhost:6060/debug/pprof/profile?seconds=70
