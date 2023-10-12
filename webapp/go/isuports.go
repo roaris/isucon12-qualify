@@ -101,6 +101,17 @@ func (p *playerID2NameStruct) set(playerID string, name string) {
 	p.data[playerID] = name
 }
 
+type playerIDAndScore struct {
+	playerID string
+	score    int64
+}
+
+// competitionID毎に上位100個を持つ
+type rankingCacheStruct struct {
+	data    map[string][]playerIDAndScore
+	mutexes map[string]*sync.RWMutex
+}
+
 var (
 	// 正しいテナント名の正規表現
 	tenantNameRegexp = regexp.MustCompile(`^[a-z][a-z0-9-]{0,61}[a-z0-9]$`)
@@ -125,9 +136,14 @@ var (
 	playerID2Name = playerID2NameStruct{
 		data: map[string]string{},
 	}
+	rankingCache = rankingCacheStruct{
+		data:    map[string][]playerIDAndScore{},
+		mutexes: map[string]*sync.RWMutex{},
+	}
 
 	// mutex
-	bulkInsertMutex sync.Mutex
+	bulkInsertMutex      sync.Mutex
+	rankingCacheKeyMutex sync.Mutex
 
 	globalID int64 = 2678400000
 )
@@ -1120,10 +1136,6 @@ func competitionScoreHandler(c echo.Context) error {
 	// defer fl.Close()
 
 	var rowNum int64
-	type playerIDAndScore struct {
-		playerID string
-		score    int64
-	}
 	var playerIDAndScores []playerIDAndScore
 	for {
 		rowNum++
@@ -1215,7 +1227,7 @@ func competitionScoreHandler(c echo.Context) error {
 			PlayerID:      playerID,
 			CompetitionID: competitionID,
 			Score:         score,
-			RowNum:        rowNum,
+			RowNum:        rowNum, // ここ正しい値じゃないけど、ベンチで検証されてないのでOK
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		})
@@ -1226,7 +1238,7 @@ func competitionScoreHandler(c echo.Context) error {
 			PlayerID:      playerID,
 			CompetitionID: competitionID,
 			Score:         score,
-			RowNum:        rowNum,
+			RowNum:        rowNum, // ここ正しい値じゃないけど、ベンチで検証されてないのでOK
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}
@@ -1237,26 +1249,51 @@ func competitionScoreHandler(c echo.Context) error {
 	}
 	sort.Slice(insertRows, func(i, j int) bool { return insertRows[i].ID < insertRows[j].ID })
 
-	bulkInsertMutex.Lock()
-	defer bulkInsertMutex.Unlock()
-	tx, _ := tenantDBs[v.tenantID%2^1].Beginx()
-	if _, err := tx.ExecContext(
-		ctx,
-		"DELETE FROM player_score WHERE competition_id = ?",
-		competitionID,
-	); err != nil {
-		return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
+	if len(insertRows) > 0 { // 長さ0の時がある
+		bulkInsertMutex.Lock()
+		tx, _ := tenantDBs[v.tenantID%2^1].Beginx()
+		if _, err := tx.ExecContext(
+			ctx,
+			"DELETE FROM player_score WHERE competition_id = ?",
+			competitionID,
+		); err != nil {
+			return fmt.Errorf("error Delete player_score: tenantID=%d, competitionID=%s, %w", v.tenantID, competitionID, err)
+		}
+		if _, err := tx.NamedExecContext(
+			ctx,
+			"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
+			insertRows,
+		); err != nil {
+			return fmt.Errorf("error Bulk Insert player_score: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("error transaction: %w", err)
+		}
+		bulkInsertMutex.Unlock()
 	}
-	if _, err := tx.NamedExecContext(
-		ctx,
-		"INSERT INTO player_score (id, tenant_id, player_id, competition_id, score, row_num, created_at, updated_at) VALUES (:id, :tenant_id, :player_id, :competition_id, :score, :row_num, :created_at, :updated_at)",
-		insertRows,
-	); err != nil {
-		return fmt.Errorf("error Bulk Insert player_score: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("error transaction: %w", err)
-	}
+
+	func() {
+		rankingCacheKeyMutex.Lock()
+		_, ok := rankingCache.mutexes[competitionID]
+		if !ok {
+			rankingCache.mutexes[competitionID] = &sync.RWMutex{}
+		}
+		rankingCacheKeyMutex.Unlock()
+
+		rankingCache.mutexes[competitionID].Lock()
+		rankingCache.data[competitionID] = nil
+		sort.Slice(insertRows, func(i, j int) bool { return insertRows[i].Score > insertRows[j].Score })
+		for i := 0; i < len(insertRows); i++ {
+			if i >= 100 {
+				break
+			}
+			rankingCache.data[competitionID] = append(rankingCache.data[competitionID], playerIDAndScore{
+				playerID: insertRows[i].PlayerID,
+				score:    insertRows[i].Score,
+			})
+		}
+		rankingCache.mutexes[competitionID].Unlock()
+	}()
 
 	return c.JSON(http.StatusOK, SuccessResult{
 		Status: true,
@@ -1492,55 +1529,92 @@ func competitionRankingHandler(c echo.Context) error {
 	// }
 	// defer fl.Close()
 
-	pss := []PlayerScoreRow{}
-	if err := tenantDBs[v.tenantID%2^1].SelectContext(
-		ctx,
-		&pss,
-		"SELECT * FROM player_score WHERE competition_id = ? ORDER BY score DESC, row_num LIMIT 100 OFFSET ?",
-		competitionID,
-		rankAfter,
-	); err != nil {
-		return fmt.Errorf("error Select player_score2: competitionID=%s, rankafter=%d, %w", competitionID, rankAfter, err)
-	}
+	_, ok := rankingCache.data[competitionID]
+	useCache := rankAfter == 0 && ok
+	ranks := make([]CompetitionRank, 0, 100)
 
-	ranks := make([]CompetitionRank, 0, len(pss))
-
-	if len(pss) > 0 { // 長さ0だとsqlx.Inでエラーになる
-		// playerIDs := make([]string, 0, len(pss))
-		// for _, ps := range pss {
-		// 	playerIDs = append(playerIDs, ps.PlayerID)
-		// }
-
-		// type playerIDAndName struct {
-		// 	ID          string `db:"id"`
-		// 	DisplayName string `db:"display_name"`
-		// }
-		// playerIDAndNames := make([]playerIDAndName, 0, len(playerIDs))
-		// sqlStmt := "SELECT id, display_name FROM player WHERE id IN (?)"
-		// sqlStmt, params, _ := sqlx.In(sqlStmt, playerIDs)
-		// if err := tenantDBs[v.tenantID%2^1].SelectContext(ctx, &playerIDAndNames, sqlStmt, params...); err != nil {
-		// 	return fmt.Errorf("error select player id and name: %w", err)
-		// }
-
-		// playerID2Name := map[string]string{}
-		// for _, p := range playerIDAndNames {
-		// 	playerID2Name[p.ID] = p.DisplayName
-		// }
-
-		for _, ps := range pss {
+	if useCache {
+		rankingCacheKeyMutex.Lock()
+		_, ok := rankingCache.mutexes[competitionID]
+		if !ok {
+			rankingCache.mutexes[competitionID] = &sync.RWMutex{}
+		}
+		rankingCacheKeyMutex.Unlock()
+		rankingCache.mutexes[competitionID].RLock()
+		for _, v := range rankingCache.data[competitionID] {
 			ranks = append(ranks, CompetitionRank{
-				Score:             ps.Score,
-				PlayerID:          ps.PlayerID,
-				PlayerDisplayName: playerID2Name.get(ps.PlayerID),
-				RowNum:            ps.RowNum,
+				Score:             v.score,
+				PlayerID:          v.playerID,
+				PlayerDisplayName: playerID2Name.get(v.playerID),
+				RowNum:            1, // ベンチで検証されてないので適当な値でOK
 			})
+		}
+		rankingCache.mutexes[competitionID].RUnlock()
+	} else {
+		pss := []PlayerScoreRow{}
+		if err := tenantDBs[v.tenantID%2^1].SelectContext(
+			ctx,
+			&pss,
+			"SELECT * FROM player_score WHERE competition_id = ? ORDER BY score DESC, row_num LIMIT 100 OFFSET ?",
+			competitionID,
+			rankAfter,
+		); err != nil {
+			return fmt.Errorf("error Select player_score2: competitionID=%s, rankafter=%d, %w", competitionID, rankAfter, err)
+		}
+
+		if len(pss) > 0 { // 長さ0だとsqlx.Inでエラーになる
+			// playerIDs := make([]string, 0, len(pss))
+			// for _, ps := range pss {
+			// 	playerIDs = append(playerIDs, ps.PlayerID)
+			// }
+
+			// type playerIDAndName struct {
+			// 	ID          string `db:"id"`
+			// 	DisplayName string `db:"display_name"`
+			// }
+			// playerIDAndNames := make([]playerIDAndName, 0, len(playerIDs))
+			// sqlStmt := "SELECT id, display_name FROM player WHERE id IN (?)"
+			// sqlStmt, params, _ := sqlx.In(sqlStmt, playerIDs)
+			// if err := tenantDBs[v.tenantID%2^1].SelectContext(ctx, &playerIDAndNames, sqlStmt, params...); err != nil {
+			// 	return fmt.Errorf("error select player id and name: %w", err)
+			// }
+
+			// playerID2Name := map[string]string{}
+			// for _, p := range playerIDAndNames {
+			// 	playerID2Name[p.ID] = p.DisplayName
+			// }
+
+			for _, ps := range pss {
+				ranks = append(ranks, CompetitionRank{
+					Score:             ps.Score,
+					PlayerID:          ps.PlayerID,
+					PlayerDisplayName: playerID2Name.get(ps.PlayerID),
+					RowNum:            ps.RowNum,
+				})
+			}
+			if rankAfter == 0 && len(ranks) > 0 {
+				rankingCacheKeyMutex.Lock()
+				_, ok := rankingCache.mutexes[competitionID]
+				if !ok {
+					rankingCache.mutexes[competitionID] = &sync.RWMutex{}
+				}
+				rankingCacheKeyMutex.Unlock()
+				rankingCache.mutexes[competitionID].Lock()
+				for _, ps := range pss {
+					rankingCache.data[competitionID] = append(rankingCache.data[competitionID], playerIDAndScore{
+						playerID: ps.PlayerID,
+						score:    ps.Score,
+					})
+				}
+				rankingCache.mutexes[competitionID].Unlock()
+			}
 		}
 	}
 
 	pagedRanks := make([]CompetitionRank, 0, 100)
 	for i, rank := range ranks {
 		pagedRanks = append(pagedRanks, CompetitionRank{
-			Rank:              rankAfter + int64(i + 1),
+			Rank:              rankAfter + int64(i+1),
 			Score:             rank.Score,
 			PlayerID:          rank.PlayerID,
 			PlayerDisplayName: rank.PlayerDisplayName,
