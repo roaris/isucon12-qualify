@@ -1272,7 +1272,7 @@ func competitionScoreHandler(c echo.Context) error {
 		bulkInsertMutex.Unlock()
 	}
 
-	func() {
+	go func() {
 		rankingCacheKeyMutex.Lock()
 		_, ok := rankingCache.mutexes[competitionID]
 		if !ok {
