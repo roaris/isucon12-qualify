@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -144,6 +143,7 @@ var (
 	// mutex
 	bulkInsertMutex      sync.Mutex
 	rankingCacheKeyMutex sync.Mutex
+	globalIDMutex        sync.Mutex
 
 	globalID int64 = 2678400000
 )
@@ -232,7 +232,9 @@ func dispenseID(ctx context.Context) (string, error) {
 	// 	return fmt.Sprintf("%x", id), nil
 	// }
 	// return "", lastErr
-	atomic.AddInt64(&globalID, 1)
+	globalIDMutex.Lock()
+	globalID += 1
+	globalIDMutex.Unlock()
 	return fmt.Sprintf("%x", globalID), nil
 }
 
