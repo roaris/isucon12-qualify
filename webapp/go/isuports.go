@@ -899,34 +899,49 @@ func playersAddHandler(c echo.Context) error {
 	}
 	displayNames := params["display_name[]"]
 
-	pds := make([]PlayerDetail, 0, len(displayNames))
-	for _, displayName := range displayNames {
-		id, err := dispenseID(ctx)
-		if err != nil {
-			return fmt.Errorf("error dispenseID: %w", err)
-		}
+	type insertRow struct {
+		ID             string `db:"id"`
+		TenantID       int64  `db:"tenant_id"`
+		DisplayName    string `db:"display_name"`
+		IsDisqualified bool   `db:"is_disqualified"`
+		CreatedAt      int64  `db:"created_at"`
+		UpdatedAt      int64  `db:"updated_at"`
+	}
+	insertRows := make([]insertRow, 0, len(displayNames))
 
+	for _, displayName := range displayNames {
+		id, _ := dispenseID(ctx)
 		now := time.Now().Unix()
-		if _, err := tenantDBs[v.tenantID%2^1].ExecContext(
-			ctx,
-			"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			id, v.tenantID, displayName, false, now, now,
-		); err != nil {
-			return fmt.Errorf(
-				"error Insert player at tenantDB: id=%s, displayName=%s, isDisqualified=%t, createdAt=%d, updatedAt=%d, %w",
-				id, displayName, false, now, now, err,
-			)
-		}
-		// p, err := retrievePlayer(ctx, tenantDBs[v.tenantID%2^1], id)
-		// if err != nil {
-		// 	return fmt.Errorf("error retrievePlayer: %w", err)
-		// }
-		pds = append(pds, PlayerDetail{
+		insertRows = append(insertRows, insertRow{
 			ID:             id,
+			TenantID:       v.tenantID,
 			DisplayName:    displayName,
 			IsDisqualified: false,
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		})
-		playerID2Name.set(id, displayName)
+	}
+	if len(insertRows) > 0 {
+		if _, err := tenantDBs[v.tenantID%2^1].NamedExecContext(
+			ctx,
+			"INSERT INTO player (id, tenant_id, display_name, is_disqualified, created_at, updated_at) VALUES (:id, :tenant_id, :display_name, :is_disqualified, :created_at, :updated_at)",
+			insertRows,
+		); err != nil {
+			return fmt.Errorf(
+				"error Bulk Insert player: %w", err,
+			)
+		}
+	}
+
+	pds := make([]PlayerDetail, 0, len(displayNames))
+
+	for _, insertRow := range insertRows {
+		pds = append(pds, PlayerDetail{
+			ID:             insertRow.ID,
+			DisplayName:    insertRow.DisplayName,
+			IsDisqualified: false,
+		})
+		playerID2Name.set(insertRow.ID, insertRow.DisplayName)
 	}
 
 	res := PlayersAddHandlerResult{
