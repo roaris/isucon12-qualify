@@ -66,21 +66,35 @@ func (v *visitMapStruct) set(competitionID string, playerID string) {
 	v.data[competitionID][playerID] = struct{}{}
 }
 
-type competitionID2TitleStruct struct {
-	data  map[string]string
+type competitionTitleAndFinishedAt struct {
+	title      string
+	finishedAt int64
+}
+
+type competitionCacheStruct struct {
+	data  map[string]*competitionTitleAndFinishedAt
 	mutex sync.RWMutex
 }
 
-func (c *competitionID2TitleStruct) get(competitionID string) string {
+func (c *competitionCacheStruct) get(competitionID string) (*competitionTitleAndFinishedAt, bool) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
-	return c.data[competitionID]
+	v, ok := c.data[competitionID]
+	return v, ok
 }
 
-func (c *competitionID2TitleStruct) set(competitionID string, title string) {
+func (c *competitionCacheStruct) set(competitionID string, title string, finishedAt int64) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	c.data[competitionID] = title
+	if _, ok := c.data[competitionID]; !ok {
+		c.data[competitionID] = &competitionTitleAndFinishedAt{}
+	}
+	if title != "" {
+		c.data[competitionID].title = title
+	}
+	if finishedAt != 0 {
+		c.data[competitionID].finishedAt = finishedAt
+	}
 }
 
 type playerID2NameStruct struct {
@@ -129,8 +143,8 @@ var (
 	visitMap = visitMapStruct{
 		data: map[string]map[string]struct{}{},
 	}
-	competitionID2Title = competitionID2TitleStruct{
-		data: map[string]string{},
+	competitionCache = competitionCacheStruct{
+		data: map[string]*competitionTitleAndFinishedAt{},
 	}
 	playerID2Name = playerID2NameStruct{
 		data: map[string]string{},
@@ -1024,7 +1038,7 @@ func competitionsAddHandler(c echo.Context) error {
 		)
 	}
 
-	competitionID2Title.set(id, title)
+	competitionCache.set(id, title, 0)
 	res := CompetitionsAddHandlerResult{
 		Competition: CompetitionDetail{
 			ID:         id,
@@ -1071,6 +1085,7 @@ func competitionFinishHandler(c echo.Context) error {
 			now, now, id, err,
 		)
 	}
+	competitionCache.set(id, "", now)
 	return c.JSON(http.StatusOK, SuccessResult{Status: true})
 }
 
@@ -1441,8 +1456,9 @@ func playerHandler(c echo.Context) error {
 		// }
 
 		for _, ps := range pss {
+			v, _ := competitionCache.get(ps.CompetitionID)
 			psds = append(psds, PlayerScoreDetail{
-				CompetitionTitle: competitionID2Title.get(ps.CompetitionID),
+				CompetitionTitle: v.title,
 				Score:            ps.Score,
 			})
 		}
@@ -1498,12 +1514,16 @@ func competitionRankingHandler(c echo.Context) error {
 	}
 
 	// 大会の存在確認
-	competition, err := retrieveCompetition(ctx, tenantDBs[v.tenantID%2^1], competitionID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "competition not found")
-		}
-		return fmt.Errorf("error retrieveCompetition: %w", err)
+	// competition, err := retrieveCompetition(ctx, tenantDBs[v.tenantID%2^1], competitionID)
+	// if err != nil {
+	// 	if errors.Is(err, sql.ErrNoRows) {
+	// 		return echo.NewHTTPError(http.StatusNotFound, "competition not found")
+	// 	}
+	// 	return fmt.Errorf("error retrieveCompetition: %w", err)
+	// }
+	comp, ok := competitionCache.get(competitionID)
+	if !ok {
+		return echo.NewHTTPError(http.StatusNotFound, "competition not found")
 	}
 
 	now := time.Now().Unix()
@@ -1512,7 +1532,8 @@ func competitionRankingHandler(c echo.Context) error {
 	// 	return fmt.Errorf("error Select tenant: id=%d, %w", v.tenantID, err)
 	// }
 
-	if !competition.FinishedAt.Valid || (now <= competition.FinishedAt.Int64) { // 大会開催内のみ記録する
+	finishedAt := comp.finishedAt
+	if finishedAt == 0 || (now <= finishedAt) { // 大会開催内のみ記録する
 		visitMap.set(competitionID, v.playerID)
 	}
 
@@ -1531,7 +1552,7 @@ func competitionRankingHandler(c echo.Context) error {
 	// }
 	// defer fl.Close()
 
-	_, ok := rankingCache.data[competitionID]
+	_, ok = rankingCache.data[competitionID]
 	useCache := rankAfter == 0 && ok
 	ranks := make([]CompetitionRank, 0, 100)
 
@@ -1627,9 +1648,9 @@ func competitionRankingHandler(c echo.Context) error {
 		Status: true,
 		Data: CompetitionRankingHandlerResult{
 			Competition: CompetitionDetail{
-				ID:         competition.ID,
-				Title:      competition.Title,
-				IsFinished: competition.FinishedAt.Valid,
+				ID:         competitionID,
+				Title:      comp.title,
+				IsFinished: comp.finishedAt != 0,
 			},
 			Ranks: pagedRanks,
 		},
@@ -1822,30 +1843,43 @@ func initializeHandler(c echo.Context) error {
 	}
 
 	type sqlResult2 struct {
-		CompetitionID    string `db:"id"`
-		CompetitionTitle string `db:"title"`
+		CompetitionID         string        `db:"id"`
+		CompetitionTitle      string        `db:"title"`
+		CompetitionFinishedAt sql.NullInt64 `db:"finished_at"`
 	}
 	var sqlResults2 []sqlResult2
 	if err := tenantDBs[0].SelectContext(
 		context.Background(),
 		&sqlResults2,
-		"SELECT id, title FROM competition",
+		"SELECT id, title, finished_at FROM competition",
 	); err != nil {
 		return fmt.Errorf("select competition from tenantDB0 failed: %e", err)
 	}
 	for _, sqlResult := range sqlResults2 {
-		competitionID2Title.set(sqlResult.CompetitionID, sqlResult.CompetitionTitle)
+		var finishedAt int64
+		if sqlResult.CompetitionFinishedAt.Valid {
+			finishedAt = sqlResult.CompetitionFinishedAt.Int64
+		} else {
+			finishedAt = 0
+		}
+		competitionCache.set(sqlResult.CompetitionID, sqlResult.CompetitionTitle, finishedAt)
 	}
 	sqlResults2 = nil
 	if err := tenantDBs[1].SelectContext(
 		context.Background(),
 		&sqlResults2,
-		"SELECT id, title FROM competition",
+		"SELECT id, title, finished_at FROM competition",
 	); err != nil {
 		return fmt.Errorf("select competition from tenantDB1 failed: %e", err)
 	}
 	for _, sqlResult := range sqlResults2 {
-		competitionID2Title.set(sqlResult.CompetitionID, sqlResult.CompetitionTitle)
+		var finishedAt int64
+		if sqlResult.CompetitionFinishedAt.Valid {
+			finishedAt = sqlResult.CompetitionFinishedAt.Int64
+		} else {
+			finishedAt = 0
+		}
+		competitionCache.set(sqlResult.CompetitionID, sqlResult.CompetitionTitle, finishedAt)
 	}
 
 	type sqlResult3 struct {
