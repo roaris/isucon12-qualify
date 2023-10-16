@@ -532,12 +532,14 @@ func authorizePlayer(ctx context.Context, tenantDB dbOrTx, id string) error {
 }
 
 type CompetitionRow struct {
-	TenantID   int64         `db:"tenant_id"`
-	ID         string        `db:"id"`
-	Title      string        `db:"title"`
-	FinishedAt sql.NullInt64 `db:"finished_at"`
-	CreatedAt  int64         `db:"created_at"`
-	UpdatedAt  int64         `db:"updated_at"`
+	TenantID     int64         `db:"tenant_id"`
+	ID           string        `db:"id"`
+	Title        string        `db:"title"`
+	FinishedAt   sql.NullInt64 `db:"finished_at"`
+	PlayerCount  sql.NullInt64 `db:"player_count"`
+	VisitorCount sql.NullInt64 `db:"visitor_count"`
+	CreatedAt    int64         `db:"created_at"`
+	UpdatedAt    int64         `db:"updated_at"`
 }
 
 // 大会を取得する
@@ -683,6 +685,34 @@ func billingReportByCompetition(ctx context.Context, tenantID int64, competitonI
 		return nil, fmt.Errorf("error retrieveCompetition: %w", err)
 	}
 
+	// 大会が終わっていないならすぐ返せる
+	if !comp.FinishedAt.Valid {
+		return &BillingReport{
+			CompetitionID:     comp.ID,
+			CompetitionTitle:  comp.Title,
+			PlayerCount:       0,
+			VisitorCount:      0,
+			BillingPlayerYen:  0,
+			BillingVisitorYen: 0,
+			BillingYen:        0,
+		}, nil
+	}
+
+	// 計算済みならそれを返す
+	if comp.PlayerCount.Valid {
+		playerCount := comp.PlayerCount.Int64
+		visitorCount := comp.VisitorCount.Int64
+		return &BillingReport{
+			CompetitionID:     comp.ID,
+			CompetitionTitle:  comp.Title,
+			PlayerCount:       playerCount,
+			VisitorCount:      visitorCount,
+			BillingPlayerYen:  100 * playerCount,
+			BillingVisitorYen: 10 * visitorCount,
+			BillingYen:        100*playerCount + 10*visitorCount,
+		}, nil
+	}
+
 	// ランキングにアクセスした参加者のIDを取得する
 	billingMap := map[string]string{}
 	for _, playerID := range visitMap.get(competitonID) {
@@ -711,18 +741,25 @@ func billingReportByCompetition(ctx context.Context, tenantID int64, competitonI
 		billingMap[pid] = "player"
 	}
 
-	// 大会が終了している場合のみ請求金額が確定するので計算する
 	var playerCount, visitorCount int64
-	if comp.FinishedAt.Valid {
-		for _, category := range billingMap {
-			switch category {
-			case "player":
-				playerCount++
-			case "visitor":
-				visitorCount++
-			}
+	for _, category := range billingMap {
+		switch category {
+		case "player":
+			playerCount++
+		case "visitor":
+			visitorCount++
 		}
 	}
+
+	// 計算結果を保存する
+	if _, err := tenantDBs[tenantID%2^1].ExecContext(
+		ctx,
+		"UPDATE competition SET player_count = ? AND visitor_count = ? WHERE id = ?",
+		playerCount, visitorCount, competitonID,
+	); err != nil {
+		return nil, fmt.Errorf("error Update competition: tenantID=%d, competitionID=%s playerCount=%d, visitorCount=%d, %w", tenantID, competitonID, playerCount, visitorCount, err)
+	}
+
 	return &BillingReport{
 		CompetitionID:     comp.ID,
 		CompetitionTitle:  comp.Title,
